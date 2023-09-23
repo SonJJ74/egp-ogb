@@ -127,32 +127,40 @@ def main():
     test_curve = []
     train_curve = []
 
-    for epoch in range(1, args.epochs + 1):
-        print("=====Epoch {}".format(epoch))
-        print('Training...')
-        train(model, device, train_loader, optimizer, dataset.task_type)
+    with open('log.txt', 'w') as f:
+        for epoch in range(1, args.epochs + 1):
+            print("=====Epoch {}".format(epoch))
+            print('Training...')
+            f.write("=====Epoch {}\n".format(epoch))
+            f.write('Training...\n')
+            train(model, device, train_loader, optimizer, dataset.task_type)
 
-        print('Evaluating...')
-        train_perf = eval(model, device, train_loader, evaluator)
-        valid_perf = eval(model, device, valid_loader, evaluator)
-        test_perf = eval(model, device, test_loader, evaluator)
+            print('Evaluating...')
+            f.write('Evaluating...')
+            train_perf = eval(model, device, train_loader, evaluator)
+            valid_perf = eval(model, device, valid_loader, evaluator)
+            test_perf = eval(model, device, test_loader, evaluator)
 
-        print({'Train': train_perf, 'Validation': valid_perf, 'Test': test_perf})
+            print({'Train': train_perf, 'Validation': valid_perf, 'Test': test_perf})
+            f.write(str({'Train': train_perf, 'Validation': valid_perf, 'Test': test_perf}) + '\n')
 
-        train_curve.append(train_perf[dataset.eval_metric])
-        valid_curve.append(valid_perf[dataset.eval_metric])
-        test_curve.append(test_perf[dataset.eval_metric])
+            train_curve.append(train_perf[dataset.eval_metric])
+            valid_curve.append(valid_perf[dataset.eval_metric])
+            test_curve.append(test_perf[dataset.eval_metric])
 
-    if 'classification' in dataset.task_type:
-        best_val_epoch = np.argmax(np.array(valid_curve))
-        best_train = max(train_curve)
-    else:
-        best_val_epoch = np.argmin(np.array(valid_curve))
-        best_train = min(train_curve)
+        if 'classification' in dataset.task_type:
+            best_val_epoch = np.argmax(np.array(valid_curve))
+            best_train = max(train_curve)
+        else:
+            best_val_epoch = np.argmin(np.array(valid_curve))
+            best_train = min(train_curve)
 
-    print('Finished training!')
-    print('Best validation score: {}'.format(valid_curve[best_val_epoch]))
-    print('Test score: {}'.format(test_curve[best_val_epoch]))
+        print('Finished training!')
+        print('Best validation score: {}'.format(valid_curve[best_val_epoch]))
+        print('Test score: {}'.format(test_curve[best_val_epoch]))
+        f.write('Finished training!\n')
+        f.write('Best validation score: {} \n'.format(valid_curve[best_val_epoch]))
+        f.write('Test score: {} \n'.format(test_curve[best_val_epoch]))
 
     if not args.filename == '':
         torch.save({'Val': valid_curve[best_val_epoch], 'Test': test_curve[best_val_epoch], 'Train': train_curve[best_val_epoch], 'BestTrain': best_train}, args.filename)
