@@ -68,13 +68,21 @@ def build_cayley_bank():
 def batched_augment_cayley(num_graphs, batch, cayley_bank):
     node_lims = np.zeros(num_graphs)
     mappings = [[] for _ in range(num_graphs)]
+    fake_mappings = [[] for _ in range(num_graphs)]
+
     for i in range(len(batch)):
-      node_lims[batch[i]] += 1
-      mappings[batch[i]].append(i)
+        node_lims[batch[i]] += 1
+        mappings[batch[i]].append(i)
+        fake_mappings[batch[i]].append(i)
 
     senders = []
     receivers = []
-    degs = np.zeros(len(batch))
+
+    fake_senders = []
+    fake_receivers = []
+
+    og_index = len(batch)
+    start_index = len(batch)
 
     for g in range(num_graphs):
         p = 2
@@ -89,22 +97,42 @@ def batched_augment_cayley(num_graphs, batch, cayley_bank):
         _p, edge_pack = cayley_bank[chosen_i]
         assert p == _p
 
+        if sz > int(node_lims[g]):
+            missing_nodes = list(range(start_index, start_index + int(sz - node_lims[g])))
+            fake_mappings[g].extend(missing_nodes)
+            start_index += len(missing_nodes)
+
+        r_mappings = mappings[g]
+        f_mappings = fake_mappings[g]
+
+        assert sz == len(f_mappings)
+
         for v, w in zip(*edge_pack):
             if v < node_lims[g] and w < node_lims[g]:
-              senders.append(mappings[g][v])
-              receivers.append(mappings[g][w])
-              degs[mappings[g][w]] += 1
+                senders.append(r_mappings[v])
+                receivers.append(r_mappings[w])
+            else:
+                fake_senders.append(f_mappings[v])
+                fake_receivers.append(f_mappings[w])
 
-    for i in range(len(batch)):
+    self_indexes_senders = []
+    self_indexes_recievers = []
+    for i in range(og_index, start_index):
+        self_indexes_senders.append(i)
+        self_indexes_recievers.append(i)
+
+    senders.extend(fake_senders)
+    receivers.extend(fake_receivers)
+
+    for i in range(start_index):
         senders.append(i)
         receivers.append(i)
-        degs[i] += 1
 
     edge_attr = []
     for i in range(len(senders)):
         edge_attr.append([0, 0, 0])  # Replace this with whatever edge features would be expected in your dataset :)
 
-    return [senders, receivers], edge_attr
+    return [senders, receivers], edge_attr, start_index, [self_indexes_senders, self_indexes_recievers]
 
 ### GIN convolution along the graph structure
 class GINConv(MessagePassing):
@@ -210,18 +238,47 @@ class GNN_node(torch.nn.Module):
         num_graphs = batched_data.num_graphs
         num_nodes = x.shape[0]
 
-        cayley_g, cayley_attr = batched_augment_cayley(num_graphs, batch, self.cayley_bank)
+        # self_edge_index are just the self connections, outside of the graph node range.
+        # I.e. if it ends at 100, then [101, 101]...
+        # From the batched Cayley graph this is outside of the range
+        cayley_g, cayley_attr, max_node, self_edge_indexes = batched_augment_cayley(num_graphs, batch, self.cayley_bank)
         cayley_g = torch.LongTensor(cayley_g).cuda()
         cayley_attr = torch.LongTensor(cayley_attr).cuda()
 
-        ### computing input node embedding
+        # New self edges for dummy nodes
+        self_edge_indexes = torch.LongTensor(self_edge_indexes).cuda()
+        # edges indexes to be be used that include real edges for the graph + self edges for dummy nodes
+        new_edge_index = torch.cat((edge_index, self_edge_indexes), dim=1).cuda()
 
         h_list = [self.atom_encoder(x)]
+
+        # Initialise them at layer 0 <- I just took the average nodes at this point
+        h_list_zero = h_list[0]
+
+        # Example of different strategies to initialise the dummy nodes
+        # Create the dummy nodes, expanding on layer[0] average
+        average_real_nodes = torch.mean(h_list[0], dim=0).cuda()
+        dummy_nodes = average_real_nodes.expand(max_node - num_nodes, -1).cuda()
+
+        # I have changed this to -1, 0
+        # dummy_nodes = torch.randn(max_node - num_nodes, self.emb_dim).to(device)
+
+        # Expand the dummy edge attr to match new_edge_index shape, of course we're just adding [0, 0, 0]
+        # Set the first nodes to what they were + [0, 0, 0] for everything else
+        dummy_edge_attr = torch.zeros(new_edge_index.shape[1], 3, dtype=torch.int64).cuda()
+        dummy_edge_attr[:edge_attr.shape[0], :] = edge_attr
+
+        # Expand the first layer to include dummy_nodes
+        h_list[0] = torch.cat((h_list[0], dummy_nodes), dim=0)
+
+        # Expand the first layer to include dummy_nodes
+        h_list[0] = torch.cat((h_list[0], dummy_nodes), dim=0)
+
         for layer in range(self.num_layer):
             if layer % 2 == 1:
                 h = self.convs[layer](h_list[layer], cayley_g, cayley_attr)
             else:
-                h = self.convs[layer](h_list[layer], edge_index, edge_attr)
+                h = self.convs[layer](h_list[layer], new_edge_index, dummy_edge_attr)
 
             h = self.batch_norms[layer](h)
 
@@ -243,6 +300,8 @@ class GNN_node(torch.nn.Module):
             node_representation = 0
             for layer in range(self.num_layer + 1):
                 node_representation += h_list[layer]
+
+        node_representation = node_representation[:num_nodes]
 
         return node_representation
 
