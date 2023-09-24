@@ -271,9 +271,6 @@ class GNN_node(torch.nn.Module):
         # Expand the first layer to include dummy_nodes
         h_list[0] = torch.cat((h_list[0], dummy_nodes), dim=0)
 
-        # Expand the first layer to include dummy_nodes
-        h_list[0] = torch.cat((h_list[0], dummy_nodes), dim=0)
-
         for layer in range(self.num_layer):
             if layer % 2 == 1:
                 h = self.convs[layer](h_list[layer], cayley_g, cayley_attr)
