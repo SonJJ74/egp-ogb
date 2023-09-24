@@ -218,6 +218,8 @@ class GNN_node(torch.nn.Module):
 
         self.atom_encoder = AtomEncoder(emb_dim)
 
+        self.emb_dim = emb_dim
+
         ###List of GNNs
         self.convs = torch.nn.ModuleList()
         self.batch_norms = torch.nn.ModuleList()
@@ -257,11 +259,13 @@ class GNN_node(torch.nn.Module):
 
         # Example of different strategies to initialise the dummy nodes
         # Create the dummy nodes, expanding on layer[0] average
-        average_real_nodes = torch.mean(h_list[0], dim=0).cuda()
-        dummy_nodes = average_real_nodes.expand(max_node - num_nodes, -1).cuda()
+        # average_real_nodes = torch.mean(h_list[0], dim=0).cuda()
+        # dummy_nodes = average_real_nodes.expand(max_node - num_nodes, self.emb_dim).cuda()
+
+
 
         # I have changed this to -1, 0
-        # dummy_nodes = torch.randn(max_node - num_nodes, self.emb_dim).to(device)
+        dummy_nodes = torch.randn(max_node - num_nodes, self.emb_dim).cuda()
 
         # Expand the dummy edge attr to match new_edge_index shape, of course we're just adding [0, 0, 0]
         # Set the first nodes to what they were + [0, 0, 0] for everything else
