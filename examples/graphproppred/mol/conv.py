@@ -265,7 +265,7 @@ class GNN_node(torch.nn.Module):
 
 
         # I have changed this to -1, 0
-        dummy_nodes = torch.randn(max_node - num_nodes, self.emb_dim).cuda()
+        dummy_nodes = torch.zeros(max_node - num_nodes, self.emb_dim).cuda()
 
         # Expand the dummy edge attr to match new_edge_index shape, of course we're just adding [0, 0, 0]
         # Set the first nodes to what they were + [0, 0, 0] for everything else
