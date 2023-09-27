@@ -1,3 +1,4 @@
+import os
 import torch
 from torch_geometric.loader import DataLoader
 import torch.optim as optim
@@ -59,6 +60,25 @@ def eval(model, device, loader, evaluator):
 
     return evaluator.eval(input_dict)
 
+def save_checkpoint(epoch, model, optimizer, filename):
+    state = {
+        'epoch': epoch, 
+        'model': model.state_dict(), 
+        'optimizer': optimizer.state_dict()
+    }
+    
+    torch.save(state, filename)
+
+def load_checkpoint(model, optimizer, checkpoint_dir, filename): 
+    filepath = os.path.join(checkpoint_dir, filename)
+    if os.path.isfile(filepath):
+        checkpoint = torch.load(filepath)
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        epoch = checkpoint['epoch']
+        return model, epoch, optimizer
+    else:
+        raise FileNotFoundError("Checkpoint file not found")
 
 def main():
     # Training settings
@@ -86,6 +106,11 @@ def main():
                         help='full feature or simple feature')
     parser.add_argument('--filename', type=str, default="",
                         help='filename to output result (default: )')
+    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints',
+                        help='directory to save checkpoint (default: checkpoints)')
+    parser.add_argument('--load_checkpoint', type=str, default=None,
+                        help='checkpoint file to load (default: None)')
+    
     args = parser.parse_args()
 
     device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
@@ -123,12 +148,22 @@ def main():
 
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+    if args.load_checkpoint:
+        model, start_epoch, optimizer = load_checkpoint(model, optimizer, args.checkpoint_dir, args.load_checkpoint)
+        start_epoch += 1
+        print("Loaded checkpoint from file: {}".format(os.path.join(args.checkpoint_dir, args.load_checkpoint)))
+    else:
+        start_epoch = 1
+
+    if not os.path.exists(args.checkpoint_dir):
+        os.makedirs(args.checkpoint_dir)
+
     valid_curve = []
     test_curve = []
     train_curve = []
 
     with open('log.txt', 'w') as f:
-        for epoch in range(1, args.epochs + 1):
+        for epoch in range(start_epoch, args.epochs + 1):
             print("=====Epoch {}".format(epoch))
             print('Training...')
             f.write("=====Epoch {}\n".format(epoch))
@@ -147,6 +182,9 @@ def main():
             train_curve.append(train_perf[dataset.eval_metric])
             valid_curve.append(valid_perf[dataset.eval_metric])
             test_curve.append(test_perf[dataset.eval_metric])
+
+            checkpoint_filename = 'checkpoint_epoch{}.pt'.format(epoch)
+            save_checkpoint(epoch, model, optimizer, os.path.join(args.checkpoint_dir, checkpoint_filename))
 
         if 'classification' in dataset.task_type:
             best_val_epoch = np.argmax(np.array(valid_curve))
